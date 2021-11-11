@@ -10,8 +10,10 @@ using System.Threading.Tasks;
 namespace Library.API.Controllers
 {
 
-    [Route("api/authors")]
+    //[Route("api/authors")]
+    [Route("api/v{version:apiVersion}/authors")]
     [ApiController]
+    //[ApiExplorerSettings(GroupName = "OpenAPISpecificationAuthor")]
     public class AuthorsController : ControllerBase
     {
         private readonly IAuthorRepository _authorsRepository;
@@ -31,6 +33,11 @@ namespace Library.API.Controllers
             var authorsFromRepo = await _authorsRepository.GetAuthorsAsync();
             return Ok(_mapper.Map<IEnumerable<Author>>(authorsFromRepo));
         }
+        /// <summary>
+        /// Get authors by Id
+        /// </summary>
+        /// <param name="authorId">Author Id</param>
+        /// <returns>Return the author</returns>
 
         [HttpGet("{authorId}")]
         public async Task<ActionResult<Author>> GetAuthor(
@@ -63,9 +70,26 @@ namespace Library.API.Controllers
             await _authorsRepository.SaveChangesAsync();
 
             // return the author
-            return Ok(_mapper.Map<Author>(authorFromRepo)); 
+            return Ok(_mapper.Map<Author>(authorFromRepo));
         }
 
+        /// <summary>
+        /// Partially update an author
+        /// </summary>
+        /// <param name="authorId">The id of the author</param>
+        /// <param name="patchDocument">The set of operations to apply to the author</param>
+        /// <returns>An actionresult of type Author</returns>
+        ///<remarks>
+        ///sample request (this request update the author's **first name**)  
+        ///     PATCH /authors/id
+        ///     [
+        ///         {
+        ///             "op" : "replace",
+        ///             "path" : "/firstname",
+        ///             "value" : "new first name"
+        ///         }
+        ///     ]
+        ///</remarks>
         [HttpPatch("{authorId}")]
         public async Task<ActionResult<Author>> UpdateAuthor(
             Guid authorId,

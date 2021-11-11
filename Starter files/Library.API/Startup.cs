@@ -1,15 +1,29 @@
 ﻿using AutoMapper;
+using Library.API.Authentication;
 using Library.API.Contexts;
+using Library.API.OperationFilters;
 using Library.API.Services;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.Abstractions;
+using Microsoft.AspNetCore.Mvc.ApiExplorer;
+using Microsoft.AspNetCore.Mvc.Authorization;
 using Microsoft.AspNetCore.Mvc.Formatters;
+using Microsoft.AspNetCore.Mvc.Versioning;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.OpenApi.Models;
+using System;
+using System.Collections.Generic;
+using System.IO;
 using System.Linq;
+using System.Reflection;
 
+[assembly: ApiConventionType(typeof(DefaultApiConventions))]
 namespace Library.API
 {
     public class Startup
@@ -27,8 +41,16 @@ namespace Library.API
             services.AddMvc(setupAction =>
             {
 
+                // global level setting the response type for the Open API specification for the end points
+                setupAction.Filters.Add(new ProducesResponseTypeAttribute(StatusCodes.Status406NotAcceptable));
+                setupAction.Filters.Add(new ProducesResponseTypeAttribute(StatusCodes.Status500InternalServerError));
+                setupAction.Filters.Add(new ProducesResponseTypeAttribute(StatusCodes.Status400BadRequest));
+                setupAction.Filters.Add(new ProducesResponseTypeAttribute(StatusCodes.Status401Unauthorized));
+
+                setupAction.Filters.Add(new AuthorizeFilter());
 
                 setupAction.ReturnHttpNotAcceptable = true;
+                setupAction.OutputFormatters.Add(new XmlSerializerOutputFormatter());
 
                 var jsonOutputFormatter = setupAction.OutputFormatters
                     .OfType<JsonOutputFormatter>().FirstOrDefault();
@@ -50,7 +72,7 @@ namespace Library.API
             // it's better to store the connection string in an environment variable)
             var connectionString = Configuration["ConnectionStrings:LibraryDBConnectionString"];
             services.AddDbContext<LibraryContext>(o => o.UseSqlServer(connectionString));
-            
+
             services.Configure<ApiBehaviorOptions>(options =>
             {
                 options.InvalidModelStateResponseFactory = actionContext =>
@@ -74,12 +96,170 @@ namespace Library.API
 
             services.AddScoped<IBookRepository, BookRepository>();
             services.AddScoped<IAuthorRepository, AuthorRepository>();
+            //services.AddSwaggerGen(action =>
+            //{
+
+            //    action.SwaggerDoc("OpenAPISpecification",
+            //       new Microsoft.OpenApi.Models.OpenApiInfo()
+            //       {
+            //           Title = "Library API",
+            //           Version = "1",
+            //           Description = "Description of the API",
+            //           Contact = new Microsoft.OpenApi.Models.OpenApiContact()
+            //           {
+            //               Email = "tapan@smartshore.nl",
+            //               Name = "Tapan Pal",
+            //               Url = new Uri("https://www.myurl.com")
+            //           },
+            //           License = new Microsoft.OpenApi.Models.OpenApiLicense()
+            //           {
+            //               Name = "MIT License",
+            //               Url = new Uri("")
+            //           },
+            //       });
+
+            //    //action.SwaggerDoc("OpenAPISpecificationAuthor",
+            //    //    new Microsoft.OpenApi.Models.OpenApiInfo()
+            //    //    {
+            //    //        Title = "Library API (Author)",
+            //    //        Version = "1",
+            //    //        Description = "Description of the API",
+            //    //        Contact = new Microsoft.OpenApi.Models.OpenApiContact()
+            //    //        {
+            //    //            Email = "tapan@smartshore.nl",
+            //    //            Name = "Tapan Pal",
+            //    //            Url = new Uri("https://www.myurl.com")
+            //    //        },
+            //    //        License = new Microsoft.OpenApi.Models.OpenApiLicense()
+            //    //        {
+            //    //            Name = "MIT License",
+            //    //            Url = new Uri("")
+            //    //        },
+            //    //    });
+
+            //    //action.SwaggerDoc("OpenAPISpecificationBook",
+            //    //    new Microsoft.OpenApi.Models.OpenApiInfo()
+            //    //    {
+            //    //        Title = "Library API (Book)",
+            //    //        Version = "1",
+            //    //        Description = "Description of the API",
+            //    //        Contact = new Microsoft.OpenApi.Models.OpenApiContact()
+            //    //        {
+            //    //            Email = "tapan@smartshore.nl",
+            //    //            Name = "Tapan Pal",
+            //    //            Url = new Uri("https://www.myurl.com")
+            //    //        },
+            //    //        License = new Microsoft.OpenApi.Models.OpenApiLicense()
+            //    //        {
+            //    //            Name = "MIT License",
+            //    //            Url = new Uri("")
+            //    //        },
+            //    //    });
+            //});
+
+            services.AddVersionedApiExplorer(setupAction =>
+            {
+                setupAction.GroupNameFormat = "'v'VV";
+            });
+
+            services.AddAuthentication("Basic")
+         .AddScheme<AuthenticationSchemeOptions, BasicAuthenticationHandler>("Basic", null);
+
+            services.AddApiVersioning(setupAction =>
+            {
+                setupAction.AssumeDefaultVersionWhenUnspecified = true;
+                setupAction.DefaultApiVersion = new ApiVersion(1, 0);
+                setupAction.ReportApiVersions = true;
+                //setupAction.ApiVersionReader = new HeaderApiVersionReader("api-version");
+                //setupAction.ApiVersionReader = new MediaTypeApiVersionReader();
+
+            });
+
+            var apiVersionDescriptionProvider =
+             services.BuildServiceProvider().GetService<IApiVersionDescriptionProvider>();
+
+
+            services.AddSwaggerGen(setupAction =>
+            {
+                foreach (var description in apiVersionDescriptionProvider.ApiVersionDescriptions)
+                {
+                    setupAction.SwaggerDoc(
+                        $"OpenAPISpecification{description.GroupName}",
+                        new Microsoft.OpenApi.Models.OpenApiInfo()
+                        {
+                            Title = "Library API",
+                            Version = description.ApiVersion.ToString(),
+                            Description = "Through this API you can access authors and books.",
+                            Contact = new Microsoft.OpenApi.Models.OpenApiContact()
+                            {
+                                Email = "kevin.dockx@gmail.com",
+                                Name = "Kevin Dockx",
+                                Url = new Uri("https://www.twitter.com/KevinDockx")
+                            },
+                            License = new Microsoft.OpenApi.Models.OpenApiLicense()
+                            {
+                                Name = "MIT License",
+                                Url = new Uri("https://opensource.org/licenses/MIT")
+                            }
+                        });
+                }
+
+                setupAction.AddSecurityDefinition("basicAuth", new OpenApiSecurityScheme()
+                {
+                    Type = SecuritySchemeType.Http,
+                    Scheme = "basic",
+                    Description = "Input your username and password to access this API"
+                });
+
+                setupAction.AddSecurityRequirement(new OpenApiSecurityRequirement
+                {
+                    {
+                        new OpenApiSecurityScheme
+                        {
+                            Reference = new OpenApiReference {
+                                Type = ReferenceType.SecurityScheme,
+                                Id = "basicAuth" }
+                        }, new List<string>() }
+                });
+
+
+                setupAction.DocInclusionPredicate((documentName, apiDescription) =>
+                {
+                    var actionApiVersionModel = apiDescription.ActionDescriptor
+                    .GetApiVersionModel(ApiVersionMapping.Explicit | ApiVersionMapping.Implicit);
+
+                    if (actionApiVersionModel == null)
+                    {
+                        return true;
+                    }
+
+                    if (actionApiVersionModel.DeclaredApiVersions.Any())
+                    {
+                        return actionApiVersionModel.DeclaredApiVersions.Any(v =>
+                        $"OpenAPISpecificationv{v}" == documentName);
+                    }
+                    return actionApiVersionModel.ImplementedApiVersions.Any(v =>
+                        $"OpenAPISpecificationv{v}" == documentName);
+                });
+
+                //action.ResolveConflictingActions(apiDescription =>
+                //{
+                //    return apiDescription.First();
+                //});
+
+                setupAction.OperationFilter<GetBookOperationFilter>();
+                setupAction.OperationFilter<CreateBookOperationFilter>();
+
+                var xmlCommentFile = $"{Assembly.GetExecutingAssembly().GetName().Name}.xml";
+                var xmlCommentFullPath = Path.Combine(AppContext.BaseDirectory, xmlCommentFile);
+                setupAction.IncludeXmlComments(xmlCommentFullPath);
+            });
 
             services.AddAutoMapper();
         }
 
         // This method gets called by the runtime. Use this method to configure the HTTP request pipeline.
-        public void Configure(IApplicationBuilder app, IHostingEnvironment env)
+        public void Configure(IApplicationBuilder app, IHostingEnvironment env, IApiVersionDescriptionProvider apiVersionDescriptionProvider)
         {
             if (env.IsDevelopment())
             {
@@ -91,10 +271,44 @@ namespace Library.API
                 // You may want to change this for production scenarios, see https://aka.ms/aspnetcore-hsts.
                 app.UseHsts();
             }
-
+             
             app.UseHttpsRedirection();
 
+            app.UseSwagger();
+            app.UseSwaggerUI(setupAction =>
+            {
+                setupAction.InjectStylesheet("/Assets/custom-ui.css");
+                setupAction.IndexStream = ()
+                        => GetType().Assembly
+                        .GetManifestResourceStream("Library.API.EmbeddedAssets.index.html");
+
+                foreach (var description in apiVersionDescriptionProvider.ApiVersionDescriptions)
+                {
+                    setupAction.SwaggerEndpoint($"/swagger/" +
+                        $"OpenAPISpecification{description.GroupName}/swagger.json",
+                        description.GroupName.ToUpperInvariant());
+                }
+
+                //setupAction.SwaggerEndpoint(
+                //    "/swagger/LibraryOpenAPISpecification/swagger.json",
+                //    "Library API");
+
+                //setupAction.SwaggerEndpoint("swagger/OpenAPISpecification/swagger.json", "Open API");
+                //setupAction.SwaggerEndpoint("swagger/OpenAPISpecificationAuthor/swagger.json", "Open API (Author)");
+                //setupAction.SwaggerEndpoint("swagger/OpenAPISpecificationBook/swagger.json", "Open API (Book)");
+                setupAction.RoutePrefix = "";
+                 
+                setupAction.DefaultModelExpandDepth(2);
+                setupAction.DefaultModelRendering(Swashbuckle.AspNetCore.SwaggerUI.ModelRendering.Model);
+                setupAction.DocExpansion(Swashbuckle.AspNetCore.SwaggerUI.DocExpansion.None);
+                setupAction.EnableDeepLinking();
+                setupAction.DisplayOperationId();
+
+            });
+
             app.UseStaticFiles();
+
+            app.UseAuthentication();
 
             app.UseMvc();
         }
